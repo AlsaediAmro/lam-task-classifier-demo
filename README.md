@@ -5,3 +5,6 @@ Worked on by:
 - [@AlsaediAmro](https://github.com/AlsaediAmro) | Data Analyst Engineer
 - [@raydbasa](https://github.com/raydbasa) | Deep Learning Engineer
 - [@AbdulazizAllahw](https://github.com/AbdulazizAllahw) | Research & Development Engineer
+
+# ~ DEMO LINK ~
+[CLICK HERE](https://lam-task-classifier-demo.streamlit.app/)
