@@ -40,65 +40,56 @@ def chat_interface(model, tokenizer, num_labels, label_encoders):
 
     # React to user input
     if prompt := st.chat_input("Enter a task description:"):
+        # Add user message to chat history
+        st.session_state.messages.append({"role": "user", "content": prompt})
+        
+        # Display user message
         with st.chat_message("user"):
             st.markdown(prompt)
-        st.session_state.messages.append({"role": "user", "content": prompt})
 
+        # Process the input and get predictions
         inputs = tokenizer(prompt, return_tensors="pt", truncation=True, padding=True, max_length=512)
+        print("Tokenizer inputs:", inputs)  # Debug print
 
-        with torch.no_grad():
-            bert_output = model.bert(**inputs).pooler_output
-            logits = {name: classifier(bert_output) for name, classifier in model.classifiers.items()}
-
-        task_labels = {
-            'r_l': 'Risk level of the task',
-            'f': 'Feasibility of the task',
-            'l': 'Legality of the task',
-            'e': 'Ethicality of the task',
-            'rv': 'Reversibility of the task',
-            'li': 'Limitation of the task'
-        }
+        try:
+            with torch.no_grad():
+                outputs = model(**inputs)
+            print("Raw model outputs:", outputs)  # Debug print
+        except Exception as e:
+            print(f"Error during model inference: {str(e)}")
+            outputs = {}
 
         predictions = {}
-        for key, logit in logits.items():
-            _, preds = torch.max(logit, dim=1)
-            pred_index = preds.item()
-            label_order = label_encoders[key]
-            try:
-                predicted_label = next(label for label, index in label_order.items() if index == pred_index)
-            except StopIteration:
-                predicted_label = list(label_order.keys())[0]
-            
-            task_label = task_labels.get(key, key)
-            predictions[task_label] = predicted_label
-
-        risk_level = predictions.get('Risk level of the task')
-        legality = predictions.get('Legality of the task')
-        ethicality = predictions.get('Ethicality of the task')
-
-        if risk_level == 'High' and legality == 'No' and ethicality == 'No':
-            message = "This task is not legal and it's risky to do."
-            message_type = 'error'
-        elif risk_level == 'Low' and legality == 'No':
-            message = "It won't proceed because it's not legal."
-            message_type = 'error'
-        elif risk_level == 'Low' and legality == 'Yes' and ethicality == 'Yes':
-            message = "Task is perfectly fine to execute."
-            message_type = 'success'
-        elif risk_level == 'High' and legality == 'Yes' and ethicality == 'Yes':
-            message = "The task is risky to do; please consider the consequences."
-            message_type = 'warning'
+        if isinstance(outputs, dict):
+            for name, logits in outputs.items():
+                print(f"Processing {name}:")  # Debug print
+                print(f"Logits shape: {logits.shape}")  # Debug print
+                _, preds = torch.max(logits, dim=1)
+                pred_index = preds.item()
+                print(f"Predicted index: {pred_index}")  # Debug print
+                label_order = label_encoders[name]
+                print(f"Label order: {label_order}")  # Debug print
+                try:
+                    predicted_label = next(label for label, index in label_order.items() if index == pred_index)
+                except StopIteration:
+                    print(f"No matching label found for index {pred_index}")  # Debug print
+                    predicted_label = "Unknown"
+                predictions[name] = predicted_label
+                print(f"Predicted label: {predicted_label}")  # Debug print
         else:
-            message = "Please review the predicted labels for a detailed analysis."
-            message_type = 'info'
+            print("Model output is not a dictionary")
 
+        print("Final predictions:", predictions)  # Debug print
+
+        # Prepare the response content
         response_content = {
             "predictions": predictions,
             "user_friendly_explanation": "Here are the predicted task labels based on your input:",
-            "custom_message": message,
-            "message_type": message_type
+            "custom_message": get_custom_message(predictions),
+            "message_type": get_message_type(predictions)
         }
 
+        # Display assistant's response
         with st.chat_message("assistant"):
             st.markdown(response_content['user_friendly_explanation'])
             display_predictions(response_content['predictions'])
@@ -112,27 +103,58 @@ def chat_interface(model, tokenizer, num_labels, label_encoders):
             else:
                 st.info(f"**Decision:** {response_content['custom_message']}")
 
+        # Add assistant's response to chat history
         st.session_state.messages.append({"role": "assistant", "content": response_content})
-
-        return logits
 
     return None
 
+def get_custom_message(predictions):
+    risk_level = predictions.get('r_l')
+    legality = predictions.get('l')
+    ethicality = predictions.get('e')
+
+    if risk_level == 'High' and legality == 'No' and ethicality == 'No':
+        return "This task is not legal and it's risky to do."
+    elif risk_level == 'Low' and legality == 'No':
+        return "It won't proceed because it's not legal."
+    elif risk_level == 'Low' and legality == 'Yes' and ethicality == 'Yes':
+        return "Task is perfectly fine to execute."
+    elif risk_level == 'High' and legality == 'Yes' and ethicality == 'Yes':
+        return "The task is risky to do; please consider the consequences."
+    else:
+        return "Please review the predicted labels for a detailed analysis."
+
+def get_message_type(predictions):
+    risk_level = predictions.get('r_l')
+    legality = predictions.get('l')
+    ethicality = predictions.get('e')
+
+    if risk_level == 'High' and legality == 'No' and ethicality == 'No':
+        return 'error'
+    elif risk_level == 'Low' and legality == 'No':
+        return 'error'
+    elif risk_level == 'Low' and legality == 'Yes' and ethicality == 'Yes':
+        return 'success'
+    elif risk_level == 'High' and legality == 'Yes' and ethicality == 'Yes':
+        return 'warning'
+    else:
+        return 'info'
+
 def get_color(label, value):
     # Function to map label and value to a specific color
-    if label == 'Risk level of the task':
+    if label == 'r_l':
         if value == 'High':
             return '#FF4B4B'  # Red
         elif value == 'Medium':
-            return '#FF914D'  # Dark Orange
+            return '#FFA500'  # Orange
         elif value == 'Low':
             return '#4CAF50'  # Green
-    elif label in ['Feasibility of the task', 'Legality of the task', 'Ethicality of the task', 'Reversibility of the task']:
+    elif label in ['f', 'l', 'e', 'rv']:
         if value == 'Yes':
             return '#4CAF50'  # Green
         elif value == 'No':
             return '#FF4B4B'  # Red
-    elif label == 'Limitation of the task':
+    elif label == 'li':
         if value == 'Yes':
             return '#FF4B4B'  # Red
         elif value == 'No':
@@ -142,12 +164,18 @@ def get_color(label, value):
 
 def display_predictions(predictions):
     # Function to display predictions in a more compact layout using columns
-    labels = list(predictions.keys())
-    values = list(predictions.values())
+    label_names = {
+        'r_l': 'Risk level of the task',
+        'f': 'Feasibility of the task',
+        'l': 'Legality of the task',
+        'e': 'Ethicality of the task',
+        'rv': 'Reversibility of the task',
+        'li': 'Limitation of the task'
+    }
 
     # Calculate the number of columns per row
-    cols_per_row = 3  # Increased to 3 columns per row for a more compact layout
-    total_labels = len(labels)
+    cols_per_row = 3
+    total_labels = len(predictions)
     rows = (total_labels + cols_per_row - 1) // cols_per_row  # Ceiling division
 
     idx = 0
@@ -155,12 +183,12 @@ def display_predictions(predictions):
         cols = st.columns(cols_per_row, gap="small")
         for col in cols:
             if idx < total_labels:
-                label = labels[idx]
-                value = values[idx]
+                label = list(predictions.keys())[idx]
+                value = predictions[label]
                 color = get_color(label, value)
-                text_color = 'white' if color != '#FF914D' else 'black'  # Ensure text is readable
+                text_color = 'white' if color != '#FFA500' else 'black'  # Ensure text is readable
                 with col:
-                    # Create a styled box using HTML with reduced padding and font size
+                    # Create a styled box using HTML with reduced padding and consistent font size
                     html_content = f'''
                     <div style="
                         background-color: {color};
@@ -171,8 +199,8 @@ def display_predictions(predictions):
                         font-weight: bold;
                         margin-bottom: 5px;
                     ">
-                        <h5 style="margin: 0 0 5px 0; font-size: 14px;">{label}</h5>
-                        <p style="font-size: 18px; margin: 0;">{value}</p>
+                        <p style="margin: 0 0 5px 0; font-size: 1em;">{label_names[label]}</p>
+                        <p style="font-size: 1em; margin: 0; font-weight: bold;">{value}</p>
                     </div>
                     '''
                     st.markdown(html_content, unsafe_allow_html=True)
